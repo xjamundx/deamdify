@@ -5,8 +5,9 @@ var through = require('through')
   , esprima = require('esprima')
   , estraverse = require('estraverse')
   , escodegen = require('escodegen')
-  , util = require('util');
-
+  , util = require('util')
+  , fs = require('fs')
+  , path = require('path');
 
 /**
  * Transform AMD to CommonJS.
@@ -29,7 +30,7 @@ module.exports = function (file) {
   
   var stream = through(write, end);
   return stream;
-  
+
   function write(buf) { data += buf }
   function end() {
     var ast = esprima.parse(data)
@@ -150,11 +151,21 @@ function createProgram(body) {
 }
 
 function createRequires(ids, vars) {
-  var decls = [];
-  
+
+  var packageJSON = module.exports.readPackageJSON() || {}
+    , browser = packageJSON.browser || {}
+	, base = packageJSON.deamdify && packageJSON.deamdify.base
+	, fullpath = base && path.resolve(process.cwd(), base)
+	, decls = [];
+
   for (var i = 0, len = ids.length; i < len; ++i) {
     if (['require', 'module', 'exports'].indexOf(ids[i]) != -1) { continue; }
-    
+
+	// add the fullpath when it exists and is needed (not already relative, full or an alias)
+    if (fullpath && !browser[ids[i]] && ids[i][0] !== "." && ids[i][0] !== "/") {
+	  ids[i] = fullpath + "/" + ids[i] + ".js";
+    }
+
     decls.push({ type: 'VariableDeclarator',
       id: { type: 'Identifier', name: vars[i] },
       init: 
@@ -182,3 +193,9 @@ function createModuleExport(obj) {
           property: { type: 'Identifier', name: 'exports' } },
        right: obj } };
 }
+
+module.exports.readPackageJSON = function readPackageJSON() {
+	var info = {};
+	try { info = JSON.parse(fs.readFileSync('package.json').toString()) } catch (e) {};
+	return info;
+};
